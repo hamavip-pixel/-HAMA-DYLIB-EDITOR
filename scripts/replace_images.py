@@ -13,7 +13,10 @@ def encode_jpeg(image, max_size):
     width, height = image.size
 
     while width >= 1 and height >= 1:
-        resized = image.resize((width, height), Image.Resampling.LANCZOS)
+        resized = image.resize(
+            (width, height),
+            Image.Resampling.LANCZOS
+        )
 
         for quality in range(95, 0, -2):
             buffer = io.BytesIO()
@@ -28,12 +31,13 @@ def encode_jpeg(image, max_size):
 
             jpeg = buffer.getvalue()
 
-            # Reserve at least 4 bytes for a valid JPEG comment segment.
             if len(jpeg) <= max_size - 4:
                 padding = max_size - len(jpeg)
-
                 comment_payload_size = padding - 4
                 comment_length = comment_payload_size + 2
+
+                if comment_length > 65535:
+                    continue
 
                 comment = (
                     b"\xff\xfe"
@@ -61,71 +65,68 @@ def replace_images(original, replacements, output):
     with open(MANIFEST, "r") as f:
         manifest = json.load(f)
 
+    if not manifest:
+        raise SystemExit("ERROR: No images found in manifest")
+
+    # Only select the first image.
+    item = manifest[0]
+
+    filename = item["filename"]
+    offset = item["offset"]
+    size = item["size"]
+    expected_hash = item["sha256"]
+
+    replacement_path = os.path.join(replacements, filename)
+
+    if not os.path.isfile(replacement_path):
+        raise SystemExit(
+            f"ERROR: Replacement image not found: {replacement_path}"
+        )
+
     with open(original, "rb") as f:
         data = bytearray(f.read())
 
-    changed = 0
+    if offset < 0 or size <= 0 or offset + size > len(data):
+        raise SystemExit("ERROR: Invalid image offset or size")
 
-    for item in manifest:
-        filename = item["filename"]
-        offset = item["offset"]
-        size = item["size"]
-        expected_hash = item["sha256"]
+    current_hash = hashlib.sha256(
+        data[offset:offset + size]
+    ).hexdigest()
 
-        replacement_path = os.path.join(replacements, filename)
-        original_image_path = os.path.join(ORIGINAL_IMAGES, filename)
+    if current_hash != expected_hash:
+        raise SystemExit("ERROR: Original image does not match manifest")
 
-        if not os.path.isfile(replacement_path):
-            print(f"Skipped (missing): {filename}")
-            continue
+    try:
+        with Image.open(replacement_path) as source:
+            image = source.convert("RGB")
 
-        if offset < 0 or size <= 0 or offset + size > len(data):
-            print(f"Skipped (invalid offset): {filename}")
-            continue
+        new_image, width, height, quality = encode_jpeg(image, size)
 
-        current_hash = hashlib.sha256(
-            data[offset:offset + size]
-        ).hexdigest()
+        data[offset:offset + size] = new_image
 
-        if current_hash != expected_hash:
-            print(f"Skipped (original mismatch): {filename}")
-            continue
+        print(f"Replaced: {filename}")
+        print(f"Final size: {len(new_image)} bytes")
+        print(f"Dimensions: {width}x{height}")
+        print(f"JPEG quality: {quality}")
 
-        try:
-            with Image.open(replacement_path) as source:
-                image = source.convert("RGB")
-
-            if os.path.isfile(original_image_path):
-                with Image.open(original_image_path) as old:
-                    image.thumbnail(
-                        (max(old.width, image.width), max(old.height, image.height))
-                    )
-
-            new_image, width, height, quality = encode_jpeg(image, size)
-
-            data[offset:offset + size] = new_image
-
-            changed += 1
-
-            print(f"Replaced: {filename}")
-            print(f"  Final size: {len(new_image)} bytes")
-            print(f"  Dimensions: {width}x{height}")
-            print(f"  JPEG quality: {quality}")
-
-        except Exception as error:
-            print(f"ERROR replacing {filename}: {error}")
+    except Exception as error:
+        raise SystemExit(f"ERROR replacing image: {error}")
 
     os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
 
     with open(output, "wb") as f:
         f.write(data)
 
-    print(f"Replaced images: {changed}")
+    print("Replaced images: 1")
+    print("Other images: unchanged")
     print(f"Output: {output}")
 
 if __name__ == "__main__":
     if len(sys.argv) != 4:
-        print("Usage: replace_images.py original.dylib replacements output.dylib")
+        print(
+            "Usage: replace_images.py "
+            "original.dylib replacements output.dylib"
+        )
         sys.exit(1)
 
     replace_images(sys.argv[1], sys.argv[2], sys.argv[3])
