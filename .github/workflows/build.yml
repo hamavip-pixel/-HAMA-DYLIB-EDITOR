@@ -11,12 +11,12 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: Extract DYLIB Images
+  edit-dylib:
+    name: Extract and Replace DYLIB Images
     runs-on: macos-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Setup Python
@@ -24,34 +24,57 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install pillow
-
-      - name: Find DYLIB
-        id: dylib
+      - name: Verify Project Files
         shell: bash
         run: |
+          set -e
+
+          test -f scripts/extract_images.py
+          test -f scripts/replace_images.py
+
+          mkdir -p input images replacements output
+
           FILE=$(find input -type f -name "*.dylib" -print -quit)
 
           if [ -z "$FILE" ]; then
-            echo "ERROR: No DYLIB found in input/"
+            echo "ERROR: Upload a DYLIB into input/"
             exit 1
           fi
 
-          echo "file=$FILE" >> "$GITHUB_OUTPUT"
+          echo "DYLIB_FILE=$FILE" >> "$GITHUB_ENV"
           echo "Found: $FILE"
 
-      - name: Extract images
+      - name: Extract Original Images
         run: |
-          python scripts/extract_images.py "${{ steps.dylib.outputs.file }}"
+          python scripts/extract_images.py "$DYLIB_FILE"
 
-      - name: Upload extracted files
+      - name: Replace Images
+        run: |
+          python scripts/replace_images.py \
+            "$DYLIB_FILE" \
+            replacements \
+            output/HAMA-EDITED.dylib
+
+      - name: Verify Output
+        shell: bash
+        run: |
+          set -e
+
+          test -s output/HAMA-EDITED.dylib
+
+          echo "HAMA DYLIB EDITOR completed."
+          ls -lh output/HAMA-EDITED.dylib
+
+      - name: Upload Final DYLIB
         uses: actions/upload-artifact@v4
         with:
-          name: HAMA-DYLIB-EXTRACTED
-          path: |
-            images/
-            output/
+          name: HAMA-EDITED-DYLIB
+          path: output/HAMA-EDITED.dylib
+          if-no-files-found: error
+
+      - name: Upload Image Manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: HAMA-IMAGE-MANIFEST
+          path: output/image_manifest.json
           if-no-files-found: error
