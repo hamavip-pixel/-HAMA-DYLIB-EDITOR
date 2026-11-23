@@ -1,32 +1,38 @@
 
-import sys
 import os
+import sys
+import hashlib
 
 def replace_images(original, replacements, output):
     with open(original, "rb") as f:
         data = bytearray(f.read())
 
-    replaced = 0
+    changed = 0
 
     for filename in sorted(os.listdir(replacements)):
-        path = os.path.join(replacements, filename)
+        replacement_path = os.path.join(replacements, filename)
 
-        if not os.path.isfile(path):
+        if not os.path.isfile(replacement_path):
             continue
 
-        print(f"Replacement candidate: {filename}")
-        print("Automatic replacement skipped: original image boundaries are not verified.")
+        with open(replacement_path, "rb") as f:
+            new_image = f.read()
+
+        print(f"Checking: {filename}")
+
+        # A safe binary replacement needs the exact original
+        # byte range, not only the extracted image filename.
+        print("Skipped: verified original offset is not available.")
 
     with open(output, "wb") as f:
         f.write(data)
 
-    print("Original DYLIB copied safely.")
-    print("No image replacements were applied.")
-    print("Generic binary replacement requires verified image offsets and sizes.")
+    print(f"Replacements completed: {changed}")
+    print("Output:", output)
 
 if __name__ == "__main__":
     if len(sys.argv) != 4:
-        print("Usage: python replace_images.py original.dylib images output.dylib")
+        print("Usage: replace_images.py original.dylib replacements output.dylib")
         sys.exit(1)
 
     replace_images(sys.argv[1], sys.argv[2], sys.argv[3])
